@@ -16,10 +16,9 @@ class GPT2Tokenizer:
         
         # 2. 如果有特殊 Token，为其专门构建一个用于 re.split 的正则
         if self.special_tokens:
-            # 关键修复 1：按照长度降序排序，确保长 Token (如 <|endoftext|><|endoftext|>) 优先匹配
             sorted_special = sorted(self.special_tokens, key=len, reverse=True)
             escaped_special = [re.escape(t) for t in sorted_special]
-            # 使用捕获组 ()，这样 re.split 切分后，分隔符（即特殊 Token 本身）也会保留在列表中
+
             self.special_pat = re.compile("(" + "|".join(escaped_special) + ")")
         else:
             self.special_pat = None
@@ -58,7 +57,6 @@ class GPT2Tokenizer:
     def encode(self, text: str) -> list[int]:
         bpe_tokens = []
         
-        # 关键修复 2：先用特殊 Token 将文本切开
         if self.special_pat:
             chunks = self.special_pat.split(text)
         else:
