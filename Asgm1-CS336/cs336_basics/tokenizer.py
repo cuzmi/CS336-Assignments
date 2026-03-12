@@ -39,7 +39,7 @@ class GPT2Tokenizer:
         
         while len(word) > 1:
             pairs = list(zip(word, word[1:]))
-            best_pair = min(pairs, key= lambda p: self.bpe_rank.get(p, float('inf'))) # TODO: lambda 的用法解释 - [By: Weijie] - 2026/03/12
+            best_pair = min(pairs, key= lambda p: self.bpe_rank.get(p, float('inf'))) # NOTE: lambda 本身不遍历，它只是定义了“对每个元素计算值的方法”。在这里实现遍历的是min - [By: Weijie] - 2026/03/12
             # NOTE: 内部细节1 pair不能存在直接break - [By: Weijie] - 2026/03/12
             if best_pair not in self.bpe_rank:
                 break
