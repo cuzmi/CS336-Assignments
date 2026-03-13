@@ -15,13 +15,12 @@ class GPT2Tokenizer:
         if special_tokens:
             sorted_speical = sorted(self.special_tokens, key=len, reverse=True)
             escape_special = [re.escape(t) for t in sorted_speical]
-                # TODO: 正则表达式的通用形式 1. 构建special用到了 2. common的pet str理解 - [By: Weijie] - 2026/03/12
-            self.special_pet = re.compile('(' + '|'.join(escape_special) + ')')
+            self.special_pat = re.compile('(' + '|'.join(escape_special) + ')')
         else:
-            self.special_pet = None
+            self.special_pat = None
 
         pat_str = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        self.pet = re.compile(pat_str)
+        self.pat = re.compile(pat_str)
 
         self.cache = {}
 
@@ -63,8 +62,8 @@ class GPT2Tokenizer:
             # NOTE: 前置细节1. 判断special是否存在 - [By: Weijie] - 2026/03/12
         bpe_tokens = []
 
-        if self.special_pet:
-            chunks = self.special_pet.split(text)
+        if self.special_pat:
+            chunks = self.special_pat.split(text)
         else:
             chunks = [text]
 
@@ -73,10 +72,10 @@ class GPT2Tokenizer:
             if not chunk:
                 continue
 
-            if self.special_pet and i % 2 == 1:
+            if self.special_pat and i % 2 == 1:
                 bpe_tokens.append(chunk.encode('utf-8'))
             else:
-                for match in self.pet.finditer(chunk):
+                for match in self.pat.finditer(chunk):
                     token_str = match.group()
                     token_bytes = token_str.encode('utf-8')
                     bpe_tokens.extend(self._bpe(token_bytes)) # NOTE: 内置细节2 extend而不是append，解包List - [By: Weijie] - 2026/03/12
@@ -94,7 +93,7 @@ class GPT2Tokenizer:
             # NOTE: 前置细节1 流式读取，line / 和encode基本相似，但是存在一些用法上的细节 - [By: Weijie] - 2026/03/12
         for line in iterable:
             if self.special_tokens:
-                chunks = self.special_pet.split(line)
+                chunks = self.special_pat.split(line)
             else:
                 chunks = [line]
 
@@ -102,10 +101,10 @@ class GPT2Tokenizer:
                 if not chunk:
                     continue
 
-                if self.special_pet and i % 2 == 1:
+                if self.special_pat and i % 2 == 1:
                     yield self.enc_vocab[chunk.encode('utf-8')]
                 else:
-                    for match in self.pet.finditer(chunk):
+                    for match in self.pat.finditer(chunk):
                         token_str = match.group()
                         token_bytes = token_str.encode('utf-8')
                         for bpe_token in self._bpe(token_bytes):
