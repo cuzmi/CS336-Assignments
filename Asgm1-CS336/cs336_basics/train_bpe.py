@@ -18,8 +18,8 @@ def run_train_bpe(
         special_tokens = []
 
     # 初始化基础词汇表 (0-255 字节)
-        # TODO: 留意这些变量在后面的作用 - [By: Weijie] - 2026/03/13
-    vocab: Dict[int, bytes] = {i: bytes([i]) for i in range(256)} # TODO: 核心 初始化 为什么要构建一个vocab词表呢，下面查看vocab的出现地方，分析用途 - [By: Weijie] - 2026/03/13
+       
+    vocab: Dict[int, bytes] = {i: bytes([i]) for i in range(256)} 
     current_next_id: int = 256
 
     token_frequency_table = defaultdict(int) # NOTE: 核心 初始化 预分词 的分组频率统计，为合并提供token和freq基础 - [By: Weijie] - 2026/03/13
@@ -136,11 +136,5 @@ def run_train_bpe(
             # 更新总体频次字典
             del token_frequency_table[token]
             token_frequency_table[new_token_frequency_seq] += freq
-
-    # 5. 保存文件
-    with open("vocab.pkl", "wb") as f:
-        pickle.dump(vocab, f)
-    with open("merges.pkl", "wb") as f:
-        pickle.dump(merges, f)
 
     return vocab, merges
