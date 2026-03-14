@@ -7,7 +7,7 @@ from typing import List, Tuple, Dict, Set, Union
 def run_train_bpe(
     input_path: Union[str, os.PathLike],
     vocab_size: int,
-    special_tokens: List[str] = None,
+    special_tokens: List[str] | None = None,
     **kwargs,
 ) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
         # NOTE: 前置细节1 判断vocab_size是否合格 - [By: Weijie] - 2026/03/13
@@ -19,17 +19,17 @@ def run_train_bpe(
 
     # 初始化基础词汇表 (0-255 字节)
         # TODO: 留意这些变量在后面的作用 - [By: Weijie] - 2026/03/13
-    vocab: Dict[int, bytes] = {i: bytes([i]) for i in range(256)}
+    vocab: Dict[int, bytes] = {i: bytes([i]) for i in range(256)} # TODO: 核心 初始化 为什么要构建一个vocab词表呢，下面查看vocab的出现地方，分析用途 - [By: Weijie] - 2026/03/13
     current_next_id: int = 256
 
-    token_frequency_table = defaultdict(int) 
-    existing_byte_values: Set[bytes] = set(vocab.values())
+    token_frequency_table = defaultdict(int) # NOTE: 核心 初始化 预分词 的分组频率统计，为合并提供token和freq基础 - [By: Weijie] - 2026/03/13
+    existing_byte_values: Set[bytes] = set(vocab.values()) # NOTE: 核心 初始化 为了记录所有的单字节bytes - [By: Weijie] - 2026/03/13
 
-    # 录入特殊字符
+    # NOTE: 后置 初始化 特殊字符统计 - [By: Weijie] - 2026/03/13
     for st_str in special_tokens:
         if not st_str: 
             continue
-        # TODO: 这个break是什么意思？ - [By: Weijie] - 2026/03/13
+        # NOTE: 后置细节1 初始化 vocab_size是固定好的，用于构建embedding hidden dim的构建 - [By: Weijie] - 2026/03/13
         if len(vocab) >= vocab_size:
             break
         st_bytes = st_str.encode("utf-8")
@@ -48,9 +48,10 @@ def run_train_bpe(
 
     # ------------------ 正则切分 (Pre-tokenization) 开始 ------------------
     # 第一步：用 special_tokens 进行大块切分，防止特殊字符被 BPE 破坏
+    # NOTE: 前置 正则切分 特殊字符处理 - [By: Weijie] - 2026/03/13
     if special_tokens:
         pattern = '|'.join(map(regex.escape, special_tokens))
-        # TODO: 这里不用加()来防止吗 - [By: Weijie] - 2026/03/13
+        # NOTE: 前置细节1 正则切分 排除特殊字符，不参与bpe合并 - [By: Weijie] - 2026/03/13
         chunks = regex.split(pattern, text)
     else:
         chunks = [text]
@@ -66,11 +67,11 @@ def run_train_bpe(
             continue
         for match in PAT.finditer(chunk):
             word_bytes = match.group().encode("utf-8")
-            # TODO: 核心 正则切分 这里使用tuple不会有损失吗，重复bytes被吃掉，难道不是以完整word为索引吗 - [By: Weijie] - 2026/03/13
             bytes_tuple = tuple(bytes([x]) for x in word_bytes)
             token_frequency_table[bytes_tuple] += 1
     # ------------------ 正则切分 (Pre-tokenization) 结束 ------------------
 
+    # NOTE: 前置 merge 统计所有pair的频率 - [By: Weijie] - 2026/03/13
     merges: List[Tuple[bytes, bytes]] = []
 
     # 统计初始的所有 Token 对频率
@@ -80,14 +81,12 @@ def run_train_bpe(
             pair_counts[token[i], token[i+1]] += freq
 
     # 4. BPE 合并主循环
-    # NOTE: 核心 merge - [By: Weijie] - 2026/03/13
-        # TODO: 核心 merge 这里为什么还有len(vocab) < vocab_size呢，是用来判断什么的 - [By: Weijie] - 2026/03/13
+    # NOTE: 核心 merge best pair -> affected token -> new token in dict, old token out / 维护了pair_count 和 token_freq - [By: Weijie] - 2026/03/13
     while len(vocab) < vocab_size:
         if not pair_counts:
             break
 
-        # 找到最高频（且字典序最大）的 pair
-        # TODO: 核心 merge 按照count，然后按照p的长度来排序 - [By: Weijie] - 2026/03/13
+        # NOTE: 核心细节1 merge 找best pair的时候, 先频率，后pair本身 - [By: Weijie] - 2026/03/13
         best_pair = max(pair_counts.keys(), key=lambda p: (pair_counts[p], p))
         merges.append(best_pair)
         
