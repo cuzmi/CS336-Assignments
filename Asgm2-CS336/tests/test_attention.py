@@ -42,9 +42,10 @@ def _make_attn_inputs(device=None):
 
 def _test_flash_forward_pass(impl, device="cpu", is_causal=False):
     q, k, v, _do = _make_attn_inputs(device)
-    o = impl(q, k, v, is_causal)
+    o = impl(q, k, v, is_causal) # NOTE: 传入一个函数 - [By: Weijie] - 2026/03/18
 
-    # Extract L from the saved tensors
+    # Extract L from the saved tensors td
+    # TODO: 自定义实现反向传播，如何实现的 - [By: Weijie] - 2026/03/18
     assert o.grad_fn.saved_tensors is not None, "No saved tensors found in the output tensor. Make sure your autograd forward is saving them using ctx.save_for_backward."
     maybe_ls = [t for t in o.grad_fn.saved_tensors if t.shape == (q.shape[0], q.shape[1])]
 
