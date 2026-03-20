@@ -126,6 +126,8 @@ class FlashAttentionPyTorch(torch.autograd.Function):
         n_q_blocks = math.ceil(N_q / block_q)
         n_k_blocks = math.ceil(N_k / block_k)
 
+        # TODO: 这里和刚刚做的数学的softmax的求奥有什么联系吗
+        #  - [By: Weijie] - 2026/03/19
         for b in range(B):
             Q = q[b]              # (Nq, D)
             K = k[b]              # (Nk, D)
@@ -190,4 +192,4 @@ class FlashAttentionPyTorch(torch.autograd.Function):
 
 
 def get_flashattention_autograd_function_pytorch():
-    return FlashAttentionPyTorch
+    return FlashAttentionPyTorch()
