@@ -22,7 +22,7 @@ num_layers = 48
 num_heads = 25
 context_length = 256
 rope_theta = 10000.0
-batch_size = 64
+batch_size = 2
 
 # dataset - ddp - x, y 工程化Dataset 在原理阶段没有必要实现
 # class RandomTokenDataset(Dataset):
