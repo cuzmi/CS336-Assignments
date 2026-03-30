@@ -30,3 +30,32 @@ class DDPIndividualParameters(nn.Module):
                 continue
             dist.all_reduce(p.grad, op = dist.ReduceOp.SUM)
             p.grad /= world_size
+
+class DDPOverlapIndividualParameters(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+        # 漏了broadcast model这一步了
+        self.handles = []
+        for p in self.module.parameters():
+            dist.broadcast(p.data, src = 0)
+            if p.requires_grad:
+                p.register_post_accumulate_grad_hook(self.backward_all_reduce)
+
+    def backward_all_reduce(self, param):
+        if param.grad is None:
+            return
+        handle = dist.all_reduce(param.grad, op = dist.ReduceOp.SUM, async_op = True)
+        self.handles.append((param, handle))
+        
+
+    def forward(self, *args, **kwargs):
+        self.handles.clear()
+        return self.module(*args, **kwargs)
+    
+    def finish_gradient_synchronization(self):
+        world_size = dist.get_world_size()
+        for param, handle in self.handles:
+            handle.wait()
+            param.grad.div_(world_size)
+            
