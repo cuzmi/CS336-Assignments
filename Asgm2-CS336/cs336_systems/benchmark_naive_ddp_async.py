@@ -24,6 +24,8 @@ context_length = 256
 rope_theta = 10000.0
 batch_size = 2
 
+
+handles = []
 # dataset - ddp - x, y 工程化Dataset 在原理阶段没有必要实现
 # class RandomTokenDataset(Dataset):
 #     def __init__(self, num_samples, context_length, vocab_size):
@@ -57,6 +59,14 @@ def setup(rank, world_size):
         device = torch.device('cpu')
     
     return device
+
+def backward_all_reduce(param):
+    global handles
+    if param.grad is None:
+        return 
+    handle = dist.all_reduce(param.grad, op = dist.ReduceOp.SUM, async_op = True)
+    handles.append((param,handle))
+    
 
 # TODO: 回顾一下LLM的dataset shape - [By: Weijie] - 2026/03/26
 def get_train_batch(rank, world_size, vocab_size, batch_size, context_length, device):
@@ -102,24 +112,24 @@ def train_one_step(LM, x, y, optimizer, device, world_size) -> float:
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
     
+    handles.clear()
     # x - local_bs, context_length; y, local_bs, context_length； logits local_bs, context_length, vocab_size
     logits = LM(x)
     loss = f.cross_entropy(
         logits.reshape(-1, logits.shape[-1]),
         y.reshape(-1)
     )
-    loss.backward()
 
     # benchmarking
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
     ar_start = time.perf_counter()
 
-    for p in LM.parameters():
-        if p.grad is None:
-            continue
-        dist.all_reduce(p.grad, op = dist.ReduceOp.SUM)
-        p.grad.div_(world_size)
+    loss.backward()
+
+    for param, handle in handles:
+        handle.wait()
+        param.grad.div_(world_size)
     
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
@@ -137,7 +147,6 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     # 生成数据集 ~ 每个进程都分配到一份
     x, y = get_train_batch(rank, world_size, vocab_size, batch_size, context_length, device)
 
-
     LM = model.BasicsTransformerLM(
         vocab_size,
         context_length,
@@ -147,6 +156,10 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         d_ff,
         rope_theta,
     ).to(device)
+
+    for p in LM.parameters():
+        if p.requires_grad:
+            p.register_post_accumulate_grad_hook(backward_all_reduce)
 
     # NOTE: optimzier本身不是数据，不是包含很多内容的对象，而是一种作用方法，不用to device - [By: Weijie] - 2026/03/27
     optimizer = AdamW(params = LM.parameters(), lr = 1e-4, betas = (0.99,0.999))

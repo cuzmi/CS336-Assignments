@@ -11,6 +11,8 @@ import os
 import torch.nn.functional as f
 import torch.distributed as dist
 import torch.multiprocessing as mp
+
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from torch.optim import AdamW
 
 from cs336_basics import model
@@ -115,11 +117,22 @@ def train_one_step(LM, x, y, optimizer, device, world_size) -> float:
         torch.cuda.synchronize(device)
     ar_start = time.perf_counter()
 
+    grads = []
+    params_with_grad = []
     for p in LM.parameters():
         if p.grad is None:
             continue
-        dist.all_reduce(p.grad, op = dist.ReduceOp.SUM)
-        p.grad.div_(world_size)
+        params_with_grad.append(p)
+        grads.append(p.grad)
+    # flatten_grad
+    flatten_grad = _flatten_dense_tensors(grads)
+    dist.all_reduce(flatten_grad, op = dist.ReduceOp.SUM)
+    flatten_grad.div_(world_size)
+    unflatten_grad = _unflatten_dense_tensors(flatten_grad, grads)
+    
+    for p, g in zip(params_with_grad, unflatten_grad):
+        # NOTE: 原地拷贝，destination和source都在 / 采用clone则改变了对象 - [By: Weijie] - 2026/03/30
+        p.grad.copy_(g)
     
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
