@@ -16,6 +16,7 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from torch.optim import AdamW
 
 from cs336_basics import model
+from .common import setup, get_train_batch
 
 vocab_size = 10000
 d_model = 1600
@@ -26,76 +27,6 @@ context_length = 256
 rope_theta = 10000.0
 batch_size = 2
 
-# dataset - ddp - x, y 工程化Dataset 在原理阶段没有必要实现
-# class RandomTokenDataset(Dataset):
-#     def __init__(self, num_samples, context_length, vocab_size):
-#         super().__init__()
-#         self.num_samples = num_samples
-#         self.context_length = context_length
-#         self.vocab_szie = vocab_size
-    
-#     def __len__(self):
-#         return self.num_samples
-    
-#     def __getitem__(self, index):
-
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12900'
-    if torch.cuda.is_available():
-        torch.cuda.set_device(rank)
-        dist.init_process_group(
-            backend = 'nccl',
-            world_size = world_size,
-            rank = rank
-        )
-        device = torch.device(f'cuda:{rank}')
-    else:
-        dist.init_process_group(
-            backend = 'gloo',
-            world_size = world_size,
-            rank = rank
-        )
-        device = torch.device('cpu')
-    
-    return device
-
-# TODO: 回顾一下LLM的dataset shape - [By: Weijie] - 2026/03/26
-def get_train_batch(rank, world_size, vocab_size, batch_size, context_length, device):
-    """
-    每一部分预留位置 - 在rank = 0 生成数据 - scatter到各个位置
-    """
-    assert batch_size % world_size == 0
-    local_bs = batch_size // world_size
-
-    x_local = torch.empty(
-        (local_bs, context_length),
-        device = device,
-        dtype = torch.long
-    )
-    y_local = torch.empty(
-        (local_bs, context_length),
-        device = device,
-        dtype = torch.long
-    )
-
-    if rank == 0:
-        torch.manual_seed(42)
-
-        global_x = torch.randint(0, vocab_size, (batch_size, context_length), dtype = torch.long, device = device)
-        global_y = torch.randint(0, vocab_size, (batch_size, context_length), dtype = torch.long, device = device)
-
-
-        x_chunk = list(global_x.chunk(world_size, dim = 0))
-        y_chunk = list(global_y.chunk(world_size, dim = 0))
-    else:
-        x_chunk = None
-        y_chunk = None
-
-    dist.scatter(x_local, scatter_list = x_chunk, src = 0)
-    dist.scatter(y_local, scatter_list = y_chunk, src = 0)
-
-    return x_local, y_local
 
 def train_one_step(LM, x, y, optimizer, device, world_size) -> float: 
     # NOTE: optimzier 清空模型上的grad - [By: Weijie] - 2026/03/27
@@ -175,20 +106,20 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
             torch.cuda.synchronize(device)
         start = time.perf_counter()
 
-        all_reduce_time = train_one_step(LM, x, y, optimizer, device, world_size)
+        all_train_time = train_one_step(LM, x, y, optimizer, device, world_size)
         
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
         end = time.perf_counter()
 
         train_time = end - start
-        ratio = all_reduce_time / train_time
+        ratio = all_train_time / train_time
 
         if rank == 0:
             print(
                 f"[rank {rank}] "
                 f"train_one_step={train_time:.6f}s, "
-                f"all_reduce_time={all_reduce_time:.6f}s, "
+                f"all_reduce_time={all_train_time:.6f}s, "
                 f"ratio={ratio * 100:.3f}%"
             )
 
@@ -197,7 +128,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
 if __name__ == "__main__":
 
     world_size = 2
-    warmup = 2
+    warmup = 5
 
     cfg = (world_size, vocab_size, batch_size, context_length, warmup)
 
