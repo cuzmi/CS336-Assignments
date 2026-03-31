@@ -1,6 +1,8 @@
 """
 1. measure the total time per train
 2. measure the proportion of time spent on communicating gradients
+三种方式测试的都是bakcward到step之间的额外通信成本
+async就是wait的成本, naive ddp就是每次all reduce的成本, flat就是flat - all reduce - unflat的成本
 """
 
 # build model -> measure gradients communication after backward, before step
@@ -25,14 +27,19 @@ context_length = 256
 rope_theta = 10000.0
 batch_size = 2
 
+
 handles = []
 
-def backward_all_reduce(param):
-    global handles
-    if param.grad is None:
-        return 
-    handle = dist.all_reduce(param.grad, op = dist.ReduceOp.SUM, async_op = True)
-    handles.append((param,handle))
+# NOTE: 外包函数传入world size， 封存内部环境变量 - [By: Weijie] - 2026/03/31
+def make_backward_all_reduce(world_size):
+    def backward_all_reduce(param):
+        global handles
+        if param.grad is None:
+            return 
+        param.grad.div_(world_size)
+        handle = dist.all_reduce(param.grad, op = dist.ReduceOp.SUM, async_op = True)
+        handles.append((param,handle))
+    return backward_all_reduce
 
 def train_one_step(LM, x, y, optimizer, device, world_size) -> float: 
     # NOTE: optimzier 清空模型上的grad - [By: Weijie] - 2026/03/27
@@ -50,20 +57,19 @@ def train_one_step(LM, x, y, optimizer, device, world_size) -> float:
     )
 
     # benchmarking
+    loss.backward()
+
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
     ar_start = time.perf_counter()
 
-    loss.backward()
-
     for param, handle in handles:
         handle.wait()
-        param.grad.div_(world_size)
     
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
     ar_end = time.perf_counter()
-    
+
     optimizer.step()
 
     return ar_end - ar_start
@@ -86,9 +92,14 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         rope_theta,
     ).to(device)
 
+    hook = make_backward_all_reduce(world_size)
+    with torch.no_grad():
+        for p in LM.parameters():
+            dist.broadcast(p, src = 0)
+
     for p in LM.parameters():
         if p.requires_grad:
-            p.register_post_accumulate_grad_hook(backward_all_reduce)
+            p.register_post_accumulate_grad_hook(hook)
 
     # NOTE: optimzier本身不是数据，不是包含很多内容的对象，而是一种作用方法，不用to device - [By: Weijie] - 2026/03/27
     optimizer = AdamW(params = LM.parameters(), lr = 1e-4, betas = (0.99,0.999))
@@ -99,25 +110,25 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         _ = train_one_step(LM, x, y, optimizer, device, world_size)
 
     # 正式训练和benchmark
-    for _ in range(2):
+    for _ in range(5):
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
         start = time.perf_counter()
 
-        all_train_time = train_one_step(LM, x, y, optimizer, device, world_size)
+        sync_time = train_one_step(LM, x, y, optimizer, device, world_size)
         
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
         end = time.perf_counter()
 
         train_time = end - start
-        ratio = all_train_time / train_time
+        ratio = sync_time / train_time
 
         if rank == 0:
             print(
                 f"[rank {rank}] "
                 f"train_one_step={train_time:.6f}s, "
-                f"all_reduce_time={all_train_time:.6f}s, "
+                f"sync_time={sync_time:.6f}s, "
                 f"ratio={ratio * 100:.3f}%"
             )
 

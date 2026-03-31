@@ -1,6 +1,8 @@
 """
 1. measure the total time per train
 2. measure the proportion of time spent on communicating gradients
+三种方式测试的都是bakcward到step之间的额外通信成本
+async就是wait的成本, naive ddp就是每次all reduce的成本, flat就是flat - all reduce - unflat的成本
 """
 
 # build model -> measure gradients communication after backward, before step
@@ -24,6 +26,7 @@ num_heads = 25
 context_length = 256
 rope_theta = 10000.0
 batch_size = 2
+
 
 
 def train_one_step(LM, x, y, optimizer, device, world_size) -> float: 
@@ -69,6 +72,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     x, y = get_train_batch(rank, world_size, vocab_size, batch_size, context_length, device)
 
 
+  
     LM = model.BasicsTransformerLM(
         vocab_size,
         context_length,
@@ -79,6 +83,12 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         rope_theta,
     ).to(device)
 
+    with torch.no_grad():
+        for p in LM.parameters():
+            dist.broadcast(p, src = 0)
+
+
+
     # NOTE: optimzier本身不是数据，不是包含很多内容的对象，而是一种作用方法，不用to device - [By: Weijie] - 2026/03/27
     optimizer = AdamW(params = LM.parameters(), lr = 1e-4, betas = (0.99,0.999))
 
@@ -88,7 +98,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         _ = train_one_step(LM, x, y, optimizer, device, world_size)
 
     # 正式训练和benchmark
-    for _ in range(2):
+    for _ in range(5):
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
         start = time.perf_counter()
