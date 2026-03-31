@@ -68,23 +68,27 @@ class DDPOverlapBucketed(nn.Module):
     def __init__(self, module, bucket_size_mb):
         super().__init__()
         self.module = module
+        self.bucket_size_mb = bucket_size_mb
 
+        self.handles = []
         # NOTE: broadcast & bucket - [By: Weijie] - 2026/03/31
         with torch.no_grad():
             for p in self.module.parameters():
                 dist.broadcast(p, src = 0)
-    
+
         for p in self.module.parameters():
             if p.requires_grad:
                 p.register_post_accumulate_grad_hook(self._account)
 
+
+    def set_buckets(self):
         current_buckets = []
         current_bucket_size = 0
         self.buckets = []
         self.p_bucket = {}
         self.bucket_cnt = defaultdict(int)
 
-        bucket_size_bytes = int(bucket_size_mb * 1024 * 1024)
+        bucket_size_bytes = int(self.bucket_size_mb * 1024 * 1024)
 
         bucket_id = 0
         for p in reversed(list(self.module.parameters())):
@@ -107,7 +111,6 @@ class DDPOverlapBucketed(nn.Module):
         if current_buckets:
             self.buckets.append(current_buckets)
 
-        self.handles = []
         
     def _account(self, param):
         bucket_id = self.p_bucket[id(param)]

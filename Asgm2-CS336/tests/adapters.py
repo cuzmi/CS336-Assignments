@@ -119,7 +119,7 @@ def ddp_bucketed_on_train_batch_start(ddp_model: torch.nn.Module, optimizer: tor
         optimizer: torch.optim.Optimizer
             Optimizer being used with the DDP-wrapped model.
     """
-    return
+    return ddp_model.set_buckets()
 
 
 def get_sharded_optimizer(params, optimizer_cls: Type[torch.optim.Optimizer], **kwargs) -> torch.optim.Optimizer:
