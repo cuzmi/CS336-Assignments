@@ -94,7 +94,7 @@ class DDPOverlapBucketed(nn.Module):
         for p in reversed(list(self.module.parameters())):
             if not p.requires_grad:
                 continue
-
+            # TODO: 这是在做什么，函数的用法 - [By: Weijie] - 2026/03/31
             p_bytes = p.numel() * p.element_size()
 
             if current_buckets and current_bucket_size + p_bytes > bucket_size_bytes:
