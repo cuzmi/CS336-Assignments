@@ -184,6 +184,7 @@ def train_main(rank, world_size, bucket_size_mb, vocab_size, batch_size, context
 
         if rank == 0:
             print(
+                f'[bucket_size: {bucket_size_mb}]'
                 f'[rank: {rank}] '
                 f'train_one_step = {train_time:.6f}s,'
                 f'wait_time = {wait_time:.6f}s,'
@@ -192,12 +193,14 @@ def train_main(rank, world_size, bucket_size_mb, vocab_size, batch_size, context
 
     dist.destroy_process_group()
 
+
 if __name__ == '__main__':
 
     warmup = 5
     world_size = 2
 
-    bucket_size_mb = 1
-    cfg = (world_size, bucket_size_mb, vocab_size, batch_size, context_length, warmup)
+    bucket_size_mbs = [1, 10, 100, 1000]
+    for bucket_size_mb in bucket_size_mbs:
+        cfg = (world_size, bucket_size_mb, vocab_size, batch_size, context_length, warmup)
 
-    mp.spawn(train_main, cfg, nprocs = 2, join = True)
+        mp.spawn(train_main, cfg, nprocs = 2, join = True)
