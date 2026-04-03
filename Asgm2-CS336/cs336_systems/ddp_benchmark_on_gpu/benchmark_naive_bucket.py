@@ -91,7 +91,7 @@ class LMBucketDDP(nn.Module):
         return
     
     def _backward_bucketed_hook(self, param):
-        # NOTE: 放到init里面最好，(get world size放在里面会每次都要执行，放到synch只需要执行一次，但是会多处wait的时间) - [By: Weijie] - 2026/04/02
+        # 放到init里面最好，(get world size放在里面会每次都要执行，放到synch只需要执行一次，但是会多处wait的时间) 
         # world_size = dist.get_world_size()
         # 判断是否运算
         bucket_id = self.p_to_bucket_id[id(param)]
@@ -102,7 +102,6 @@ class LMBucketDDP(nn.Module):
             grads = [p.grad.div_(self.world_size) for p in params]
             flatten_tensor = _flatten_dense_tensors(grads)
             handle = dist.all_reduce(flatten_tensor, op = dist.ReduceOp.SUM, async_op = True)
-            # NOTE: 为什么这里要加上flatten tensor？ 因为unflatten不在这里做 - [By: Weijie] - 2026/04/02
             self.handles.append((handle, params, flatten_tensor))
             # unflatten能否在这里面执行？ - backward之后handle完成也在原地等待而没有立即执行， 还是存在时间冗余
     
