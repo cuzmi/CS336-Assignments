@@ -138,4 +138,4 @@ def get_sharded_optimizer(params, optimizer_cls: Type[torch.optim.Optimizer], **
     Returns:
         Instance of sharded optimizer.
     """
-    return naive_ddp.ShardedOptimizer(params, optimizer_cls, **kwargs)
+    return naive_ddp.ShardedOptimizerC(params, optimizer_cls, **kwargs)
