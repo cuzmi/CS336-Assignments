@@ -216,6 +216,8 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup,
 
     collections.reset_runs()
 
+    train_times = []
+
     for _ in range(5):
         if device.type == "cuda":
             torch.cuda.synchronize(device)
@@ -228,16 +230,24 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup,
         end = time.perf_counter()
 
         train_time = end - start
-        _ = train_time
+        train_times.append(train_time)
         collections.finish_capture()
 
     local_summary = collections.return_max()
+    avg_train_time = sum(train_times) / len(train_times)
 
     gathered = [None for _ in range(world_size)] if rank == 0 else None
     dist.gather_object(local_summary, object_gather_list=gathered, dst=0)
+    gathered_avg_train_times = [None for _ in range(world_size)] if rank == 0 else None
+    dist.gather_object(avg_train_time, object_gather_list=gathered_avg_train_times, dst=0)
 
     if rank == 0:
         print(f"\n=== mode: {mode} ===")
+        print("[average train time]")
+        max_avg_train_time = max(gathered_avg_train_times)
+        for r, rank_avg_train_time in enumerate(gathered_avg_train_times):
+            print(f"rank {r}: avg_train_one_step={rank_avg_train_time:.6f}s")
+        print(f"max_across_ranks: avg_train_one_step={max_avg_train_time:.6f}s")
         for stage_name in local_summary.keys():
             print(f"[{stage_name}]")
             max_allocated_mb = 0.0

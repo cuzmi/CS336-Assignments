@@ -27,6 +27,15 @@ context_length = 256
 rope_theta = 10000.0
 batch_size = 2
 
+vocab_size = 1024
+d_model = 128
+d_ff = 512
+num_layers = 2
+num_heads = 4
+context_length = 32
+rope_theta = 10000.0
+batch_size = 1
+
 
 
 def train_one_step(LM, x, y, optimizer, device, world_size) -> float: 
@@ -93,6 +102,8 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     optimizer = AdamW(params = LM.parameters(), lr = 1e-4, betas = (0.99,0.999))
 
     LM.train()
+    train_times = []
+    all_reduce_times = []
     # NOTE: warmup就是走几遍要记时的全流程 - [By: Weijie] - 2026/03/27
     for _ in range(warmup):
         _ = train_one_step(LM, x, y, optimizer, device, world_size)
@@ -111,6 +122,8 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
 
         train_time = end - start
         ratio = all_train_time / train_time
+        train_times.append(train_time)
+        all_reduce_times.append(all_train_time)
 
         if rank == 0:
             print(
@@ -119,6 +132,18 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
                 f"all_reduce_time={all_train_time:.6f}s, "
                 f"ratio={ratio * 100:.3f}%"
             )
+
+    avg_train_time = sum(train_times) / len(train_times)
+    avg_all_reduce_time = sum(all_reduce_times) / len(all_reduce_times)
+    avg_ratio = avg_all_reduce_time / avg_train_time
+
+    if rank == 0:
+        print(
+            f"[rank {rank}] "
+            f"avg_train_one_step={avg_train_time:.6f}s, "
+            f"avg_all_reduce_time={avg_all_reduce_time:.6f}s, "
+            f"avg_ratio={avg_ratio * 100:.3f}%"
+        )
 
     dist.destroy_process_group()
 
