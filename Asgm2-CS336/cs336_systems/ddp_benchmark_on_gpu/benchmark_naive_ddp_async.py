@@ -39,8 +39,9 @@ class OverlapDDP(torch.nn.Module):
 
         self.handles = []
 
-        for p in self.module.parameters():
-            dist.broadcast(p, src = 0)
+        with torch.no_grad():
+            for p in self.module.parameters():
+                dist.broadcast(p, src = 0)
         
         for p in self.module.parameters():
             if p.requires_grad:
