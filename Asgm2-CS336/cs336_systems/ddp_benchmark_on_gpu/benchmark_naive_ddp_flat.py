@@ -80,7 +80,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     device = setup(rank, world_size)
 
     # 生成数据集 ~ 每个进程都分配到一份
-    x, y = get_train_batch(rank, world_size, vocab_size, batch_size, context_length, device)
+    x, y = get_train_batch(rank, world_size, batch_size, vocab_size, context_length, device)
 
 
     LM = model.BasicsTransformerLM(

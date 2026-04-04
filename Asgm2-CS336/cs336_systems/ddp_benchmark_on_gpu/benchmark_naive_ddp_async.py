@@ -28,18 +28,40 @@ rope_theta = 10000.0
 batch_size = 2
 
 
-handles = []
+class OverlapDDP(torch.nn.Module):
+    def __init__(self, module):
+        """
+        grad + hook; synchronsize for handle wait; step = setp
+        """
+        # NOTE: module 存在检查attr的属性， module/para等要先创建好实例才能self.module - [By: Weijie] - 2026/04/04
+        super().__init__()
+        self.module = module
 
-# NOTE: 外包函数传入world size， 封存内部环境变量 - [By: Weijie] - 2026/03/31
-def make_backward_all_reduce(world_size):
-    def backward_all_reduce(param):
-        global handles
+        self.handles = []
+
+        for p in self.module.parameters():
+            dist.broadcast(p, src = 0)
+        
+        for p in self.module.parameters():
+            if p.requires_grad:
+                p.register_post_accumulate_grad_hook(self.backward_hook)
+    
+    def forward(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
+
+    def backward_hook(self, param):
+        self.rank = dist.get_rank()
+        self.world_size = dist.get_world_size()
+
         if param.grad is None:
-            return 
-        param.grad.div_(world_size)
-        handle = dist.all_reduce(param.grad, op = dist.ReduceOp.SUM, async_op = True)
-        handles.append((param,handle))
-    return backward_all_reduce
+            return
+        handle = dist.all_reduce(param.grad, dist.ReduceOp.SUM, async_op = True)
+        self.handles.append((param,handle))
+
+    def finish_gradient_synchronization(self):
+        for param, handle in self.handles:
+            handle.wait()
+            param.grad.div_(self.world_size)
 
 def train_one_step(LM, x, y, optimizer, device, world_size) -> float: 
     # NOTE: optimzier 清空模型上的grad - [By: Weijie] - 2026/03/27
@@ -48,7 +70,6 @@ def train_one_step(LM, x, y, optimizer, device, world_size) -> float:
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
     
-    handles.clear()
     # x - local_bs, context_length; y, local_bs, context_length； logits local_bs, context_length, vocab_size
     logits = LM(x)
     loss = f.cross_entropy(
@@ -63,8 +84,7 @@ def train_one_step(LM, x, y, optimizer, device, world_size) -> float:
         torch.cuda.synchronize(device)
     ar_start = time.perf_counter()
 
-    for param, handle in handles:
-        handle.wait()
+    LM.finish_gradient_synchronization()
     
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
@@ -80,7 +100,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     device = setup(rank, world_size)
 
     # 生成数据集 ~ 每个进程都分配到一份
-    x, y = get_train_batch(rank, world_size, vocab_size, batch_size, context_length, device)
+    x, y = get_train_batch(rank, world_size, batch_size, vocab_size, context_length, device)
 
     LM = model.BasicsTransformerLM(
         vocab_size,
@@ -92,14 +112,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         rope_theta,
     ).to(device)
 
-    hook = make_backward_all_reduce(world_size)
-    with torch.no_grad():
-        for p in LM.parameters():
-            dist.broadcast(p, src = 0)
-
-    for p in LM.parameters():
-        if p.requires_grad:
-            p.register_post_accumulate_grad_hook(hook)
+    LM = OverlapDDP(LM)
 
     # NOTE: optimzier本身不是数据，不是包含很多内容的对象，而是一种作用方法，不用to device - [By: Weijie] - 2026/03/27
     optimizer = AdamW(params = LM.parameters(), lr = 1e-4, betas = (0.99,0.999))
@@ -142,4 +155,3 @@ if __name__ == "__main__":
     cfg = (world_size, vocab_size, batch_size, context_length, warmup)
 
     mp.spawn(fn = train_main, args = cfg, nprocs = world_size, join = True)
-    
