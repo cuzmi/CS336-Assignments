@@ -27,14 +27,14 @@ context_length = 256
 rope_theta = 10000.0
 batch_size = 2
 
-vocab_size = 1024
-d_model = 128
-d_ff = 512
-num_layers = 2
-num_heads = 4
-context_length = 32
-rope_theta = 10000.0
-batch_size = 1
+# vocab_size = 1024
+# d_model = 128
+# d_ff = 512
+# num_layers = 2
+# num_heads = 4
+# context_length = 32
+# rope_theta = 10000.0
+# batch_size = 1
 
 
 
