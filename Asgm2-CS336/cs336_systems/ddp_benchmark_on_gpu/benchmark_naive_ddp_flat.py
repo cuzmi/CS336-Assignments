@@ -18,7 +18,7 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from torch.optim import AdamW
 
 from cs336_basics import model
-from .common import setup, get_train_batch
+from .common import setup, get_train_batch, report_rank_metrics
 
 vocab_size = 10000
 d_model = 1600
@@ -28,6 +28,7 @@ num_heads = 25
 context_length = 256
 rope_theta = 10000.0
 batch_size = 2
+measure_iters = int(os.environ.get("BENCHMARK_ITERS", "5"))
 
 def train_one_step(LM, x, y, optimizer, device, world_size) -> float: 
     # NOTE: optimzier 清空模型上的grad - [By: Weijie] - 2026/03/27
@@ -106,7 +107,9 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         _ = train_one_step(LM, x, y, optimizer, device, world_size)
 
     # 正式训练和benchmark
-    for _ in range(5):
+    train_times = []
+    all_reduce_times = []
+    for _ in range(measure_iters):
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
         start = time.perf_counter()
@@ -119,6 +122,8 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
 
         train_time = end - start
         ratio = all_train_time / train_time
+        train_times.append(train_time)
+        all_reduce_times.append(all_train_time)
 
         if rank == 0:
             print(
@@ -128,12 +133,27 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
                 f"ratio={ratio * 100:.3f}%"
             )
 
+    avg_train_time = sum(train_times) / len(train_times)
+    avg_all_reduce_time = sum(all_reduce_times) / len(all_reduce_times)
+    avg_ratio = avg_all_reduce_time / avg_train_time
+
+    report_rank_metrics(
+        rank,
+        world_size,
+        "flat_ddp_benchmark",
+        {
+            "avg_train_one_step": avg_train_time,
+            "avg_all_reduce_time": avg_all_reduce_time,
+            "avg_ratio_pct": avg_ratio * 100,
+        }
+    )
+
     dist.destroy_process_group()
 
 if __name__ == "__main__":
 
     world_size = 2
-    warmup = 5
+    warmup = int(os.environ.get("BENCHMARK_WARMUP", "5"))
 
     cfg = (world_size, vocab_size, batch_size, context_length, warmup)
 

@@ -16,7 +16,7 @@ import torch.multiprocessing as mp
 from torch.optim import AdamW
 
 from cs336_basics import model
-from .common import setup, get_train_batch
+from .common import setup, get_train_batch, report_rank_metrics, relaunch_with_nsys_if_requested
 
 vocab_size = 10000
 d_model = 1600
@@ -26,6 +26,7 @@ num_heads = 25
 context_length = 256
 rope_theta = 10000.0
 batch_size = 2
+measure_iters = int(os.environ.get("BENCHMARK_ITERS", "5"))
 
 # vocab_size = 1024
 # d_model = 128
@@ -78,7 +79,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     device = setup(rank, world_size)
 
     # 生成数据集 ~ 每个进程都分配到一份
-    x, y = get_train_batch(rank, world_size, vocab_size, batch_size, context_length, device)
+    x, y = get_train_batch(rank, world_size, batch_size, vocab_size, context_length, device)
 
 
   
@@ -109,7 +110,7 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
         _ = train_one_step(LM, x, y, optimizer, device, world_size)
 
     # 正式训练和benchmark
-    for _ in range(5):
+    for _ in range(measure_iters):
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
         start = time.perf_counter()
@@ -137,20 +138,27 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     avg_all_reduce_time = sum(all_reduce_times) / len(all_reduce_times)
     avg_ratio = avg_all_reduce_time / avg_train_time
 
-    if rank == 0:
-        print(
-            f"[rank {rank}] "
-            f"avg_train_one_step={avg_train_time:.6f}s, "
-            f"avg_all_reduce_time={avg_all_reduce_time:.6f}s, "
-            f"avg_ratio={avg_ratio * 100:.3f}%"
-        )
+    report_rank_metrics(
+        rank,
+        world_size,
+        "naive_ddp_benchmark",
+        {
+            "avg_train_one_step": avg_train_time,
+            "avg_all_reduce_time": avg_all_reduce_time,
+            "avg_ratio_pct": avg_ratio * 100,
+        }
+    )
 
     dist.destroy_process_group()
 
 if __name__ == "__main__":
+    relaunch_with_nsys_if_requested(
+        "cs336_systems.ddp_benchmark_on_gpu.benchmark_naive_ddp",
+        "naive_ddp_nsys",
+    )
 
     world_size = 2
-    warmup = 5
+    warmup = int(os.environ.get("BENCHMARK_WARMUP", "5"))
 
     cfg = (world_size, vocab_size, batch_size, context_length, warmup)
 

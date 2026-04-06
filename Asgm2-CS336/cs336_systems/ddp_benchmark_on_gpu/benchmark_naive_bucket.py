@@ -20,7 +20,7 @@ from torch._utils import _unflatten_dense_tensors, _flatten_dense_tensors
 
 
 from cs336_basics import model
-from .common import setup, get_train_batch
+from .common import setup, get_train_batch, report_rank_metrics
 
 vocab_size = 10000
 d_model = 1600
@@ -30,6 +30,7 @@ num_heads = 25
 context_length = 256
 rope_theta = 10000.0
 batch_size = 2
+measure_iters = int(os.environ.get("BENCHMARK_ITERS", "5"))
 
 
 handles = []
@@ -165,7 +166,9 @@ def train_main(rank, world_size, bucket_size_mb, vocab_size, batch_size, context
     for _ in range(warmup):
         _ = train_one_step(LMBucket, x_local, y_local, optimizer, device)
 
-    for _ in range(5):
+    train_times = []
+    wait_times = []
+    for _ in range(measure_iters):
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
         
@@ -180,6 +183,8 @@ def train_main(rank, world_size, bucket_size_mb, vocab_size, batch_size, context
 
         train_time = end - start
         ratio = wait_time / train_time
+        train_times.append(train_time)
+        wait_times.append(wait_time)
 
         if rank == 0:
             print(
@@ -190,12 +195,27 @@ def train_main(rank, world_size, bucket_size_mb, vocab_size, batch_size, context
                 f'ratio = {ratio * 100:.3f}%'
             )
 
+    avg_train_time = sum(train_times) / len(train_times)
+    avg_wait_time = sum(wait_times) / len(wait_times)
+    avg_ratio = avg_wait_time / avg_train_time
+
+    report_rank_metrics(
+        rank,
+        world_size,
+        f"bucketed_ddp_benchmark_bucket_{bucket_size_mb}mb",
+        {
+            "avg_train_one_step": avg_train_time,
+            "avg_wait_time": avg_wait_time,
+            "avg_ratio_pct": avg_ratio * 100,
+        }
+    )
+
     dist.destroy_process_group()
 
 
 if __name__ == '__main__':
 
-    warmup = 5
+    warmup = int(os.environ.get("BENCHMARK_WARMUP", "5"))
     world_size = 2
 
     bucket_size_mbs = [1, 10, 100, 1000]

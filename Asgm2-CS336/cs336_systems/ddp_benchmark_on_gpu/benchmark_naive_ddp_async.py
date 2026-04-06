@@ -16,7 +16,7 @@ import torch.multiprocessing as mp
 from torch.optim import AdamW
 
 from cs336_basics import model
-from .common import setup, get_train_batch
+from .common import setup, get_train_batch, report_rank_metrics, relaunch_with_nsys_if_requested
 
 vocab_size = 10000
 d_model = 1600
@@ -26,6 +26,7 @@ num_heads = 25
 context_length = 256
 rope_theta = 10000.0
 batch_size = 2
+measure_iters = int(os.environ.get("BENCHMARK_ITERS", "5"))
 
 
 class OverlapDDP(torch.nn.Module):
@@ -63,6 +64,8 @@ class OverlapDDP(torch.nn.Module):
         for param, handle in self.handles:
             handle.wait()
             param.grad.div_(self.world_size)
+        
+        self.handles.clear()
 
 def train_one_step(LM, x, y, optimizer, device, world_size) -> float: 
     # NOTE: optimzier 清空模型上的grad - [By: Weijie] - 2026/03/27
@@ -119,12 +122,14 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
     optimizer = AdamW(params = LM.parameters(), lr = 1e-4, betas = (0.99,0.999))
 
     LM.train()
+    train_times = []
+    sync_times = []
     # NOTE: warmup就是走几遍要记时的全流程 - [By: Weijie] - 2026/03/27
     for _ in range(warmup):
         _ = train_one_step(LM, x, y, optimizer, device, world_size)
 
     # 正式训练和benchmark
-    for _ in range(5):
+    for _ in range(measure_iters):
         if device.type == 'cuda':
             torch.cuda.synchronize(device)
         start = time.perf_counter()
@@ -137,6 +142,8 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
 
         train_time = end - start
         ratio = sync_time / train_time
+        train_times.append(train_time)
+        sync_times.append(sync_time)
 
         if rank == 0:
             print(
@@ -146,12 +153,31 @@ def train_main(rank, world_size, vocab_size, batch_size, context_length, warmup)
                 f"ratio={ratio * 100:.3f}%"
             )
 
+    avg_train_time = sum(train_times) / len(train_times)
+    avg_sync_time = sum(sync_times) / len(sync_times)
+    avg_ratio = avg_sync_time / avg_train_time
+
+    report_rank_metrics(
+        rank,
+        world_size,
+        "overlap_individual_parameters_benchmark",
+        {
+            "avg_train_one_step": avg_train_time,
+            "avg_sync_time": avg_sync_time,
+            "avg_ratio_pct": avg_ratio * 100,
+        }
+    )
+
     dist.destroy_process_group()
 
 if __name__ == "__main__":
+    relaunch_with_nsys_if_requested(
+        "cs336_systems.ddp_benchmark_on_gpu.benchmark_naive_ddp_async",
+        "overlap_individual_nsys",
+    )
 
     world_size = 2
-    warmup = 5
+    warmup = int(os.environ.get("BENCHMARK_WARMUP", "5"))
 
     cfg = (world_size, vocab_size, batch_size, context_length, warmup)
 
