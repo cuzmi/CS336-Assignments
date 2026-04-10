@@ -1,3 +1,9 @@
+"""
+optimizer 属性: param_groups, state, defaults
+通过外包装和利用state 来实现自定义的optimizer方法, 通过遍历param_groups对每一个参数进行自定义更新
+//
+1. 原地修改, 形式为 tensor.xxx_
+"""
 import math
 import torch
 from torch.optim import Optimizer
