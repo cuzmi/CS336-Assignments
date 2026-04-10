@@ -10,6 +10,27 @@ def run_train_bpe(
     special_tokens: List[str] | None = None,
     **kwargs,
 ) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
+    """Given the path to an input corpus, run train a BPE tokenizer and
+    output its vocabulary and merges.
+
+    Args:
+        input_path (str | os.PathLike): Path to BPE tokenizer training data
+        vocab_size (int): Total number of items in the tokenizer's vocabulary (including special tokens).
+        special_token (list[str]): A list of string speical tokens to be added to the tokenizer vocabulary.
+            These strings will never be split into multiple tokens, and will always be
+            kept as a single token. If these special tokens occur in the 'input_path',
+            they are treated as any other string.
+
+    Returns:
+        tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+            vocab:
+                The trained tokenizer vocabulary, a mapping from int (token ID in the vocabulary)
+                to bytes (token bytes)
+            merges:
+                BPE merges. Each list item is a tuple of bytes (<token1>, <token2>),
+                representing that <token1> was merged with <token2>.
+                Merges are ordered by order of creation.
+    """
         # NOTE: 前置细节1 判断vocab_size是否合格 - [By: Weijie] - 2026/03/13
     if not isinstance(vocab_size, int) or vocab_size <= 0:
         raise ValueError("vocab_size 必须是一个正整数。")
@@ -139,93 +160,3 @@ def run_train_bpe(
 
     return vocab, merges
 
-
-def run_train_bpe(
-    input_path: str | os.PathLike,
-    vocab_size: int,
-    special_tokens: list[str],
-    **kwargs,
-) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    """Given the path to an input corpus, run train a BPE tokenizer and
-    output its vocabulary and merges.
-
-    Args:
-        input_path (str | os.PathLike): Path to BPE tokenizer training data
-        vocab_size (int): Total number of items in the tokenizer's vocabulary (including special tokens).
-        special_token (list[str]): A list of string speical tokens to be added to the tokenizer vocabulary.
-            These strings will never be split into multiple tokens, and will always be
-            kept as a single token. If these special tokens occur in the 'input_path',
-            they are treated as any other string.
-
-    Returns:
-        tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-            vocab:
-                The trained tokenizer vocabulary, a mapping from int (token ID in the vocabulary)
-                to bytes (token bytes)
-            merges:
-                BPE merges. Each list item is a tuple of bytes (<token1>, <token2>),
-                representing that <token1> was merged with <token2>.
-                Merges are ordered by order of creation.
-    """
-    if not isinstance(vocab_size, int) or vocab_size <= 0:
-        raise ValueError(f"Invalid vocab_size: {vocab_size}")
-    
-    if special_tokens is None:
-        special_tokens = []
-
-    # ========== 1. initialization ==========
-
-    vocab: Dict[int, bytes] = {i: bytes[i] for i in range(256)}
-    current_vocab_id = 256
-
-    current_bytes: Set[bytes] = set(vocab.values())
-
-    for sp_str in special_tokens:
-        if not sp_str:
-            continue
-        if len(vocab) > vocab_size:
-            break
-        sp_bytes = sp_str.encode('utf-8')
-        if sp_bytes not in current_bytes:
-            vocab[current_vocab_id] = sp_bytes
-            current_vocab_id += 1
-            current_bytes.add(sp_bytes)
-
-    # ========== 2. load file ==========
-    try:
-        with open(input_path, "r", encoding = "utf-8", errors = "ignore") as f:
-            text = f.read()
-    except FileNotFoundError:
-        print('Could not find the file, check the file path')
-        text = ""
-
-    # ========== 3. PAT split ==========
-
-    corpus_freq: Dict[int, int] = defaultdict(int)
-
-
-
-    # ========== 4. count corpus and pair ==========
-
-
-
-
-    # ========== 5. get inside BPE train ==========
-
-
-
-    # ========== 5.1 find the best pari ==========
-
-
-
-    # ========== 5.2 confirm corresponding word ==========
-
-
-
-
-    # ========== 5.3 use updated pair to replace original pair in word ==========
-
-
-
-
-    # ========== 5.4 add updated pair into merge and vocab
