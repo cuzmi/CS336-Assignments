@@ -273,11 +273,11 @@ def singleprocess_bpe_main(input_path, vocab_size, special_tokens):
     with open("single_bpe_tinystories.pkl", "wb") as f:
         pickle.dump(output, f)
 
-    print(f"single_process_bpe:"
-          f"total time: {end_time - start_time}"
-          f"current memory: {current / 1024 /1024 :2f} MB"
-          f"peak memory: {peak / 1024 / 1024 :2f} MB"
-          f"max token: {max_token}, len: {len(max_token)}")
+    print(f"single_process_bpe:\n"
+          f"total time: {end_time - start_time}\n"
+          f"current memory: {current / 1024 /1024 :2f}MB\n"
+          f"peak memory: {peak / 1024 / 1024 :2f}\nMB"
+          f"max token: {max_token}, len: {len(max_token)}\n")
 
     
 if __name__ == "__main__":
