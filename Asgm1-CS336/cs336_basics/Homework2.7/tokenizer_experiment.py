@@ -1,3 +1,8 @@
+"""
+//
+1. 大文件取样的方法, 一行一行读，然后后面可以覆盖前面的取样
+2. np.array 比list 更适合存储<同类型，纯数字> (更省空间, npy更支持array), 所以通常把list转换成array再存储
+"""
 import os
 import random
 import time
