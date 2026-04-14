@@ -1,111 +1,103 @@
+import pickle
+from typing import Iterable, Iterator
+
 import regex as re
-from typing import Iterator, Iterable, List
+
 
 class GPT2Tokenizer:
-    def __init__(self, vocab: dict[int, bytes], merge: List[tuple[bytes, bytes]], special_tokens: List[str] | None = None):
-        # 初始化操作
-        self.vocab = vocab # NOTE: decode base - [By: Weijie] - 2026/03/12
-        self.enc_vocab = {b: i for i, b in vocab.items()}
-        self.bpe_rank = {m:i for i, m in enumerate(merge)}
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,
+    ) -> None:
+        self.vocab = vocab
+        self.inverse_vocab = {token_bytes: token_id for token_id, token_bytes in vocab.items()}
+        self.merges = merges
+        self.bpe_rank = {pair: rank for rank, pair in enumerate(merges)}
 
-        self.special_tokens = special_tokens or []
-        self.special_tokens = set(self.special_tokens)
-
-            # NOTE: 特殊token判断 - [By: Weijie] - 2026/03/12
-        if special_tokens:
-            sorted_speical = sorted(self.special_tokens, key=len, reverse=True)
-            escape_special = [re.escape(t) for t in sorted_speical]
-            self.special_pat = re.compile('(' + '|'.join(escape_special) + ')')
+        self.special_tokens = set(special_tokens or [])
+        if self.special_tokens:
+            escaped = [re.escape(token) for token in sorted(self.special_tokens, key=len, reverse=True)]
+            self.special_pat = re.compile("(" + "|".join(escaped) + ")")
         else:
             self.special_pat = None
 
         pat_str = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         self.pat = re.compile(pat_str)
+        self.cache: dict[bytes, list[bytes]] = {}
 
-        self.cache = {}
+    @classmethod
+    def from_files(
+        cls,
+        vocab_filepath: str,
+        merges_filepath: str,
+        special_tokens: list[str] | None = None,
+    ) -> "GPT2Tokenizer":
+        with open(vocab_filepath, "rb") as vocab_file:
+            vocab_data = pickle.load(vocab_file)
 
-    def _bpe(self, token_bytes):
-        # NOTE: 核心  匹配 pair 并用新word来覆盖替代 - [By: Weijie] - 2026/03/12
+        if isinstance(vocab_data, dict) and "vocab" in vocab_data and "merges" in vocab_data:
+            vocab = vocab_data["vocab"]
+            merges = vocab_data["merges"]
+        else:
+            vocab = vocab_data
+            with open(merges_filepath, "rb") as merges_file:
+                merges = pickle.load(merges_file)
 
-            # NOTE: 前置细节1 判断是否存在cache - [By: Weijie] - 2026/03/12
+        return cls(vocab=vocab, merges=merges, special_tokens=special_tokens)
+
+    def _bpe(self, token_bytes: bytes) -> list[bytes]:
         if token_bytes in self.cache:
             return self.cache[token_bytes]
-            # NOTE: 前置细节2 进行bytes转换， 将提取的int转化为对应的bytes - [By: Weijie] - 2026/03/12
-        word = [bytes([b]) for b in token_bytes]
 
+        word = [bytes([byte]) for byte in token_bytes]
         if not word:
             return []
-        
+
         while len(word) > 1:
             pairs = list(zip(word, word[1:]))
-            best_pair = min(pairs, key= lambda p: self.bpe_rank.get(p, float('inf'))) # NOTE: lambda 本身不遍历，它只是定义了“对每个元素计算值的方法”。在这里实现遍历的是min - [By: Weijie] - 2026/03/12
-            # NOTE: 内部细节1 pair不能存在直接break - [By: Weijie] - 2026/03/12
+            best_pair = min(pairs, key=lambda pair: self.bpe_rank.get(pair, float("inf")))
             if best_pair not in self.bpe_rank:
                 break
 
-            new_word = []
+            merged_word = []
             i = 0
-            while i <len(word):
-                if i < len(word) - 1 and (word[i], word[i+1]) == best_pair:
-                    new_word.append(best_pair[0] + best_pair[1])
+            while i < len(word):
+                if i < len(word) - 1 and (word[i], word[i + 1]) == best_pair:
+                    merged_word.append(best_pair[0] + best_pair[1])
                     i += 2
                 else:
-                     new_word.append(word[i])
-                     i += 1
-            word = new_word
+                    merged_word.append(word[i])
+                    i += 1
+            word = merged_word
 
+        self.cache[token_bytes] = word
         return word
-    
-    def encode(self, text: str) -> List[int]:
-        # NOTE: 核心： 先匹配speical在匹配common - [By: Weijie] - 2026/03/12
 
-            # NOTE: 前置细节1. 判断special是否存在 - [By: Weijie] - 2026/03/12
-        bpe_tokens = []
+    def encode(self, text: str) -> list[int]:
+        token_bytes_list: list[bytes] = []
 
-        if self.special_pat:
-            chunks = self.special_pat.split(text)
-        else:
-            chunks = [text]
-
-        for i, chunk in enumerate(chunks):
-            # NOTE: 内置细节1. 特殊切分会导致空字符 - [By: Weijie] - 2026/03/12
+        chunks = self.special_pat.split(text) if self.special_pat else [text]
+        for index, chunk in enumerate(chunks):
             if not chunk:
                 continue
 
-            if self.special_pat and i % 2 == 1:
-                bpe_tokens.append(chunk.encode('utf-8'))
-            else:
-                for match in self.pat.finditer(chunk):
-                    token_str = match.group()
-                    token_bytes = token_str.encode('utf-8')
-                    bpe_tokens.extend(self._bpe(token_bytes)) # NOTE: 内置细节2 extend而不是append，解包List - [By: Weijie] - 2026/03/12
-        
-        return [self.enc_vocab[token] for token in bpe_tokens]
+            if self.special_pat and index % 2 == 1:
+                token_bytes_list.append(chunk.encode("utf-8"))
+                continue
 
-    def decode(self, ids: List[int]) -> str:
-        # NOTE: 核心 解码为str - [By: Weijie] - 2026/03/12
-            # NOTE: 前置细节1 将int转换为bytes，方便后面decode - [By: Weijie] - 2026/03/12
-        token_bytes = b"".join([self.vocab[i] for i in ids])
-        return token_bytes.decode('utf-8', errors='replace') # NOTE: 内置细节1 无法解码单独的非完整的utf-8字符，会产生报错 - [By: Weijie] - 2026/03/12
+            for match in self.pat.finditer(chunk):
+                token_bytes_list.extend(self._bpe(match.group().encode("utf-8")))
+
+        return [self.inverse_vocab[token_bytes] for token_bytes in token_bytes_list]
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
-        # NOTE: 核心 流式输出encode - [By: Weijie] - 2026/03/12
-            # NOTE: 前置细节1 流式读取，line / 和encode基本相似，但是存在一些用法上的细节 - [By: Weijie] - 2026/03/12
-        for line in iterable:
-            if self.special_tokens:
-                chunks = self.special_pat.split(line)
-            else:
-                chunks = [line]
+        for text in iterable:
+            for token_id in self.encode(text):
+                yield token_id
 
-            for i, chunk in enumerate(chunks):
-                if not chunk:
-                    continue
+    def decode(self, ids: list[int]) -> str:
+        token_bytes = b"".join(self.vocab[token_id] for token_id in ids)
+        return token_bytes.decode("utf-8", errors="replace")
 
-                if self.special_pat and i % 2 == 1:
-                    yield self.enc_vocab[chunk.encode('utf-8')]
-                else:
-                    for match in self.pat.finditer(chunk):
-                        token_str = match.group()
-                        token_bytes = token_str.encode('utf-8')
-                        for bpe_token in self._bpe(token_bytes):
-                            yield self.enc_vocab[bpe_token]
