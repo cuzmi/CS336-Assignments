@@ -208,7 +208,7 @@ def pre_tokenization(input_path, start, end, special_tokens) -> Dict[Tuple[bytes
     
     return corpus_freq
 
-def multiprocess_bpe_main(input_path, vocab_size, special_tokens):
+def multiprocess_bpe_main(input_path, vocab_size, special_tokens, output_path):
 
     tracemalloc.start()
     start_time = time.perf_counter()
@@ -222,8 +222,10 @@ def multiprocess_bpe_main(input_path, vocab_size, special_tokens):
         for start, end in zip(boundaries[:-1], boundaries[1:])
     ]
 
+    process_start = time.perf_counter()
     with mp.Pool(num_processes) as pool:
         results = pool.starmap(pre_tokenization, task)
+    process_end = time.perf_counter()
 
     # 汇总corpus_freq， 传入train bpe中
     corpus_table = defaultdict(int)
@@ -231,9 +233,12 @@ def multiprocess_bpe_main(input_path, vocab_size, special_tokens):
         for corpus, freq in result.items():
             corpus_table[corpus] += freq
 
+    bpe_start = time.perf_counter()
     vocab, merges = multi_run_train_bpe(corpus_table, vocab_size, special_tokens)
+    bpe_end = time.perf_counter()
 
     end_time = time.perf_counter()
+    total_time = end_time - start_time
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
@@ -244,16 +249,18 @@ def multiprocess_bpe_main(input_path, vocab_size, special_tokens):
         "merges": merges
     }
 
-    with open("multi_bpe_tinystories.pkl", "wb") as f:
+    with open(output_path, "wb") as f:
         pickle.dump(output, f)
 
-    print(f"multi_process_bpe:"
-          f"total time: {end_time - start_time}"
-          f"current memory: {current / 1024 /1024 :2f} MB"
-          f"peak memory: {peak / 1024 / 1024 :2f} MB"
-          f"max token: {max_token}, len: {len(max_token)}")
+    print(f"multi_process_bpe:\n"
+          f"total time: {total_time}" 
+          f"process time ratio: {(process_end - process_start) / total_time :2f}%"
+          f"bpe time ratio: {(bpe_end - bpe_start) / total_time :2f}%\n"
+          f"current memory: {current / 1024 /1024 :2f} MB\n"
+          f"peak memory: {peak / 1024 / 1024 :2f} MB\n"
+          f"max token: {max_token}, len: {len(max_token)}\n")
 
-def singleprocess_bpe_main(input_path, vocab_size, special_tokens):
+def singleprocess_bpe_main(input_path, vocab_size, special_tokens, output_path):
     tracemalloc.start()
     start_time = time.perf_counter()
 
@@ -270,7 +277,7 @@ def singleprocess_bpe_main(input_path, vocab_size, special_tokens):
         "merges": merges
     }
 
-    with open("single_bpe_tinystories.pkl", "wb") as f:
+    with open(output_path, "wb") as f:
         pickle.dump(output, f)
 
     print(f"single_process_bpe:\n"
@@ -281,10 +288,18 @@ def singleprocess_bpe_main(input_path, vocab_size, special_tokens):
 
     
 if __name__ == "__main__":
-    input_path = "../data/TinyStoriesV2-GPT4-train.txt"
+    os.makedirs("./train", exist_ok = True)
+    
+    input_path = "./data/TinyStoriesV2-GPT4-train.txt"
     vocab_size = 10000
     special_tokens = ['<|endoftext|>']
+    output_path = "./train/multi_bpe_tinystories.pkl"
+    singleprocess_bpe_main(input_path, vocab_size, special_tokens, output_path)
+    multiprocess_bpe_main(input_path, vocab_size, special_tokens, output_path)
 
-    singleprocess_bpe_main(input_path, vocab_size, special_tokens)
-    multiprocess_bpe_main(input_path, vocab_size, special_tokens)
+    input_path = "./data/owt_train.txt"
+    vocab_size = 32000
+    output_path = "./train/multi_bpe_owt.pkl"
+    multiprocess_bpe_main(input_path, vocab_size, special_tokens, output_path)
+
 
