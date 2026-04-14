@@ -1,5 +1,8 @@
 """
 pre tokenization并行化, 得到corpus_freq后返回合并, 再在一个进程中运行bpe
+//
+1. 并行操作, 普通的并行直接对pool里面传递函数和参数
+2. 联调操作, 要提前设定好对应的借口
 """
 import os
 import multiprocessing as mp
