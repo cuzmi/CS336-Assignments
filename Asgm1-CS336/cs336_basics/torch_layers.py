@@ -79,6 +79,33 @@ class RMSNorm(nn.Module):
         output = out * self.W
 
         return output
+
+"""
+1. GLU 多了一条分支到Ac 处结合
+"""
+class SwiGLU(nn.Module):
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+        self.W1 = nn.Parameter(torch.empty(d_ff, d_model))
+        self.W2 = nn.Parameter(torch.empty(d_ff, d_model))
+        self.W3 = nn.Parameter(torch.empty(d_model, d_ff))
+
+    @staticmethod
+    def SiLU(x: torch.Tensor) -> torch.Tensor:
+        sigmoid_denom = torch.exp(-x) + 1
+        output = x / sigmoid_denom
+
+        return output        
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gate_x = SwiGLU.SiLU(x @ self.W1.T)
+        x_ffn1 = x @ self.W2.T
+
+        position_wise_x = x_ffn1 * gate_x
+
+        output = position_wise_x @ self.W3.T
+
+        return output
     
 """
 0. 分组 attention 是生成在各个尺度上的attention
@@ -109,7 +136,6 @@ class CausalMultiHeadAttention(nn.Module):
             q = self.Q[i*self.head_size:(i+1) * self.head_size, :]
             k = self.K[i*self.head_size:(i+1) * self.head_size, :]
             v = self.V[i*self.head_size:(i+1) * self.head_size, :]
-
 
             q = x @ q.T
             k = x @ k.T

@@ -91,7 +91,13 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = torch_layers.SwiGLU(d_model, d_ff)
+    with torch.no_grad():
+        swiglu.W1.copy_(w1_weight)
+        swiglu.W3.copy_(w2_weight)
+        swiglu.W2.copy_(w3_weight)
+    
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
