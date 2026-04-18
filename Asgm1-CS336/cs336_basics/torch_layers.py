@@ -46,17 +46,6 @@ class Embedding(nn.Module):
         return self.W[x]
 
 """
-softmax:
-1. 注意针对每个元素的操作， 和以前的以矩阵为基本单位不同， 这里是对每个元素的操作
-"""
-def softmax(in_features, dim) -> Float[torch.Tensor, "..."]:
-    max_logits = torch.max(in_features, dim = dim, keepdim = True).values
-    exp_inp = torch.exp(in_features - max_logits)
-    dim_sum = torch.sum(exp_inp, dim = dim, keepdim = True)
-
-    return exp_inp / dim_sum
-
-"""
 1. Norm 层其实是Norm + pre-feature linear 组成的
 2. Linear 参数是针对feature列(不是每个元素) 进行学习的, Norm 是针对样本的, 把Norm 拆开来就好理解
 """
@@ -108,20 +97,22 @@ class SwiGLU(nn.Module):
         return output
 
 """
-还不能复现lol
+终于理顺逻辑了。。。
+1. 采用 二维旋转 是最小满足 内积自然出现相对位置; 且旋转后不改变向量长度 条件
+2. 多一个“频率” 而不直接存 position-feature-angle 是为了外推性
 """
 class RoPE(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
         super().__init__()
 
-        # feature pair 旋转的快慢
+        # feature pair 旋转的快慢 / 角度有 sin cos 可以用
         pair_indices = torch.arange(0, d_k, 2, dtype = torch.float32, device = device)
 
         inv_freq = theta ** (-pair_indices / d_k)
         # 不同位置 影响feature 旋转的长短
         positions = torch.arange(0, max_seq_len, dtype = torch.float32, device = device)
-        # 每个位置 在不同feature 上旋转的角度
-        angles = positions[:, None] * inv_freq[None, :]
+        # position - feature 角度
+        angles = positions[:, None] * inv_freq[None, :] # [T, d_k // 2]
 
         self.register_buffer("cos_cache", torch.cos(angles), persistent = False)
         self.register_buffer("sin_cache", torch.sin(angles), persistent = False)
@@ -136,10 +127,35 @@ class RoPE(nn.Module):
         sin = self.sin_cache[positions].to(dtype = x.dtype)
 
         out = torch.empty_like(x)
+        # d_k // 2 -> d_k
         out[..., ::2] = x_even * cos - x_odd * sin
         out[..., 1::2] = x_even * sin + x_odd * cos
 
         return out
+
+"""
+softmax:
+1. 注意针对每个元素的操作， 和以前的以矩阵为基本单位不同， 这里是对每个元素的操作
+"""
+def softmax(in_features, dim) -> Float[torch.Tensor, "..."]:
+    max_logits = torch.max(in_features, dim = dim, keepdim = True).values
+    exp_inp = torch.exp(in_features - max_logits)
+    dim_sum = torch.sum(exp_inp, dim = dim, keepdim = True)
+
+    return exp_inp / dim_sum
+
+"""
+1. ~mask 对bool 全部取反
+"""
+def DotProdAttention(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask: torch.Tensor):
+    d_k = Q.shape[-1]
+    
+    scores = (Q @ K.transpose(-2,-1)) * (d_k ** -0.5)
+    scores = scores.masked_fill(~mask, float("-inf"))
+
+    scores = softmax(scores, dim = -1)
+    out = scores @ V # 矩阵乘法
+    return out
 
 """
 0. 分组 attention 是生成在各个尺度上的attention
@@ -182,7 +198,7 @@ class CausalMultiHeadAttention(nn.Module):
 
             scores = self.sm(scores)
             
-            head_output = scores @ v # 无x存在
+            head_output = scores @ v 
             head_outputs.append(head_output)
         
         output = torch.cat(head_outputs, dim = -1)
