@@ -55,3 +55,49 @@ def softmax(in_features, dim) -> Float[torch.Tensor, "..."]:
     dim_sum = torch.sum(exp_inp, dim = dim, keepdim = True)
 
     return exp_inp / dim_sum
+
+
+class CausalMultiHeadAttention(nn.Module):
+    # 1. scaled_dot 自己实现mask 2. masked fill 另一种mask方法
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_size = d_model // self.num_heads
+        self.Q = torch.empty((d_model, d_model))
+        self.K = torch.empty((d_model, d_model))
+        self.V = torch.empty((d_model, d_model))
+
+        self.sm = nn.Softmax(dim = -1)
+
+        self.W_o = torch.empty((d_model, d_model))
+    
+    # 在forward 输出 B,N,N
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, _ = x.shape
+
+        head_outputs = []
+
+        for i in range(self.num_heads):
+            q = self.Q[i*self.head_size:(i+1) * self.head_size, :]
+            k = self.K[i*self.head_size:(i+1) * self.head_size, :]
+            v = self.V[i*self.head_size:(i+1) * self.head_size, :]
+
+
+            q = x @ q.T
+            k = x @ k.T
+            v = x @ v.T
+
+            scores = ( q @ k.transpose(-2,-1) ) * (self.head_size ** -0.5) # 使用transpose而不是T
+            # mask
+            mask = torch.triu(torch.ones(T, T, dtype = torch.bool), diagonal = 1)
+            scores = scores.masked_fill(mask, float("-inf"))
+
+            scores = self.sm(scores)
+            
+            head_output = scores @ v # 无x存在
+            head_outputs.append(head_output)
+        
+        output = torch.cat(head_outputs, dim = -1)
+        output = output @ self.W_o.T
+
+        return output
