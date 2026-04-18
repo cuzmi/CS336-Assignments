@@ -57,6 +57,11 @@ def softmax(in_features, dim) -> Float[torch.Tensor, "..."]:
     return exp_inp / dim_sum
 
 
+"""
+0. 分组 attention 是生成在各个尺度上的attention
+1. 由于x的存储方式, 导致 W 的存储方式为 [d_out, d_in]
+2. 多维度下, 使用transpose 而不是 .T 进行转置
+"""
 class CausalMultiHeadAttention(nn.Module):
     # 1. scaled_dot 自己实现mask 2. masked fill 另一种mask方法
     def __init__(self, d_model, num_heads):
