@@ -106,7 +106,41 @@ class SwiGLU(nn.Module):
         output = position_wise_x @ self.W3.T
 
         return output
-    
+
+"""
+还不能复现lol
+"""
+class RoPE(nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super().__init__()
+
+        # feature pair 旋转的快慢
+        pair_indices = torch.arange(0, d_k, 2, dtype = torch.float32, device = device)
+
+        inv_freq = theta ** (-pair_indices / d_k)
+        # 不同位置 影响feature 旋转的长短
+        positions = torch.arange(0, max_seq_len, dtype = torch.float32, device = device)
+        # 每个位置 在不同feature 上旋转的角度
+        angles = positions[:, None] * inv_freq[None, :]
+
+        self.register_buffer("cos_cache", torch.cos(angles), persistent = False)
+        self.register_buffer("sin_cache", torch.sin(angles), persistent = False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        # rotation需要 x_2i & x_2i+1
+        x_even = x[..., ::2]
+        x_odd = x[..., 1::2]
+
+        positions = token_positions.to(dtype = torch.long)
+        cos = self.cos_cache[positions].to(dtype = x.dtype)
+        sin = self.sin_cache[positions].to(dtype = x.dtype)
+
+        out = torch.empty_like(x)
+        out[..., ::2] = x_even * cos - x_odd * sin
+        out[..., 1::2] = x_even * sin + x_odd * cos
+
+        return out
+
 """
 0. 分组 attention 是生成在各个尺度上的attention
 1. 为了方便特征维变换, 把x放前面, 导致 W 的存储方式为 [d_out, d_in]
