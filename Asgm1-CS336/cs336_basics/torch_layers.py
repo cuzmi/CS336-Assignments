@@ -112,7 +112,7 @@ class RoPE(nn.Module):
         inv_freq = theta ** (-pair_indices / d_k)
         # 不同位置 影响feature 旋转的长短
         positions = torch.arange(0, max_seq_len, dtype = torch.float32, device = device)
-        # position - feature 角度
+        # position - feature 角度 ~ 提前创建好了table， 下面根据position直接取
         angles = positions[:, None] * inv_freq[None, :] # [T, d_k // 2]
 
         self.register_buffer("cos_cache", torch.cos(angles), persistent = False)
