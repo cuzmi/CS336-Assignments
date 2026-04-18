@@ -4,6 +4,7 @@
 import torch
 import torch.nn as nn
 from jaxtyping import Int, Float
+from torch import Tensor
 
 # 工程上采用的不是课本上的 W@x 运算, 而是 x@W, 这样方便处理batch 所以W 一般存储为 (d_out, d_in)
 # e.g. (batch, d_in) @ (d_out, d_in).T  如果还是W在前面，那么就会要多纬度变化了
@@ -50,7 +51,7 @@ class Embedding(nn.Module):
 2. Linear 参数是针对feature列(不是每个元素) 进行学习的, Norm 是针对样本的, 把Norm 拆开来就好理解
 """
 class RMSNorm(nn.Module):
-    def __init__(self, d_model, eps):
+    def __init__(self, d_model, eps = 1e-5):
         super().__init__()
 
         self.eps = eps
@@ -206,3 +207,84 @@ class CausalMultiHeadAttention(nn.Module):
 
         return output
     
+class MHAwRoPE(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int, theta: float) -> Float[Tensor, " ... sequence_length d_out"]:
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_size = d_model // self.num_heads
+        self.Q = nn.Parameter(torch.empty((d_model, d_model)))
+        self.K = nn.Parameter(torch.empty((d_model, d_model)))
+        self.V = nn.Parameter(torch.empty((d_model, d_model)))
+
+        self.rope = RoPE(theta, self.head_size, max_seq_len)
+
+        self.sm = nn.Softmax(dim = -1)
+
+        self.W_o = nn.Parameter(torch.empty((d_model, d_model)))
+    
+    # 在forward 输出 B,N,N
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        B, T, _ = x.shape
+
+        head_outputs = []
+
+        for i in range(self.num_heads):
+            q = self.Q[i*self.head_size:(i+1) * self.head_size, :]
+            k = self.K[i*self.head_size:(i+1) * self.head_size, :]
+            v = self.V[i*self.head_size:(i+1) * self.head_size, :]
+
+            q = x @ q.T
+            k = x @ k.T
+            v = x @ v.T
+
+            q = self.rope(q, token_positions)
+            k = self.rope(k, token_positions)
+
+            scores = ( q @ k.transpose(-2,-1) ) * (self.head_size ** -0.5) # 使用transpose而不是T
+            # mask
+            mask = torch.triu(torch.ones(T, T, dtype = torch.bool), diagonal = 1)
+            scores = scores.masked_fill(mask, float("-inf"))
+
+            scores = self.sm(scores)
+            
+            head_output = scores @ v 
+            head_outputs.append(head_output)
+        
+        output = torch.cat(head_outputs, dim = -1)
+        output = output @ self.W_o.T
+
+        return output
+    
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, weights):
+        super().__init__()
+        # mla + rmsnorm + rope
+        self.d_k = d_model // num_heads
+        self.mha_rope = MHAwRoPE(d_model, num_heads, max_seq_len, theta)
+        self.rms1 = RMSNorm(d_model)
+        self.rms2 = RMSNorm(d_model)
+        self.ffn = SwiGLU(d_model, d_ff)
+
+        with torch.no_grad():
+            self.mha_rope.Q.copy_(weights['attn.q_proj.weight'])
+
+            self.mha_rope.K.copy_(weights['attn.k_proj.weight'])
+            self.mha_rope.V.copy_(weights['attn.v_proj.weight'])
+            self.mha_rope.W_o.copy_(weights['attn.output_proj.weight'])
+
+            self.rms1.W.copy_(weights['ln1.weight'])
+            self.ffn.W1.copy_(weights['ffn.w1.weight'])
+            self.ffn.W3.copy_(weights['ffn.w2.weight'])
+            self.ffn.W2.copy_(weights['ffn.w3.weight'])
+            self.rms2.W.copy_(weights['ln2.weight'])
+            
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, _ = x.shape
+        token_positions = torch.arange(T, device=x.device).unsqueeze(0).expand(B, T)
+
+        x = self.mha_rope(self.rms1(x), token_positions) + x
+
+        x = self.ffn(self.rms2(x)) + x
+
+        return x
+        
