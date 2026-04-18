@@ -391,10 +391,14 @@ def run_rmsnorm(
             dimensions.
 
     Returns:
-        Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
+        Float[Tensor,"... d_moel"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    rms = torch_layers.RMSNorm(d_model, eps)
+    with torch.no_grad():
+        rms.W.copy_(weights)
+
+    return rms(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
