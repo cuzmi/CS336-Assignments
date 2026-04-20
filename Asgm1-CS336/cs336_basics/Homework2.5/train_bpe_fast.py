@@ -208,7 +208,6 @@ def pre_tokenization(input_path, start, end, special_tokens) -> Dict[Tuple[bytes
     return corpus_freq
 
 def multiprocess_bpe_main(input_path, vocab_size, special_tokens, output_path):
-
     tracemalloc.start()
     start_time = time.perf_counter()
     ## Usage
