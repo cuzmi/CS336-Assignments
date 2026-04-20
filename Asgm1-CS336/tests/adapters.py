@@ -303,7 +303,20 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    block = torch_layers.TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta, weights)
+    block = torch_layers.TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
+    with torch.no_grad():
+        block.mha_rope.Q.copy_(weights['attn.q_proj.weight'])
+
+        block.mha_rope.K.copy_(weights['attn.k_proj.weight'])
+        block.mha_rope.V.copy_(weights['attn.v_proj.weight'])
+        block.mha_rope.W_o.copy_(weights['attn.output_proj.weight'])
+
+        block.rms1.W.copy_(weights['ln1.weight'])
+        block.ffn.W1.copy_(weights['ffn.w1.weight'])
+        block.ffn.W3.copy_(weights['ffn.w2.weight'])
+        block.ffn.W2.copy_(weights['ffn.w3.weight'])
+        block.rms2.W.copy_(weights['ln2.weight'])
+
     return block(in_features)
 
 
@@ -386,7 +399,28 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transfomer = torch_layers.TransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta)
+
+    with torch.no_grad():
+        transfomer.emb.W.copy_(weights['token_embeddings.weight'])
+        transfomer.rms.W.copy_(weights['ln_final.weight'])
+        transfomer.linear.W.copy_(weights['lm_head.weight'])
+        
+        for i in range(num_layers):
+            layers_no = f"layers.{i}."
+            transfomer.blocks[i].mha_rope.Q.copy_(weights[layers_no + 'attn.q_proj.weight'])
+
+            transfomer.blocks[i].mha_rope.K.copy_(weights[layers_no +'attn.k_proj.weight'])
+            transfomer.blocks[i].mha_rope.V.copy_(weights[layers_no +'attn.v_proj.weight'])
+            transfomer.blocks[i].mha_rope.W_o.copy_(weights[layers_no +'attn.output_proj.weight'])
+
+            transfomer.blocks[i].rms1.W.copy_(weights[layers_no +'ln1.weight'])
+            transfomer.blocks[i].ffn.W1.copy_(weights[layers_no +'ffn.w1.weight'])
+            transfomer.blocks[i].ffn.W3.copy_(weights[layers_no +'ffn.w2.weight'])
+            transfomer.blocks[i].ffn.W2.copy_(weights[layers_no +'ffn.w3.weight'])
+            transfomer.blocks[i].rms2.W.copy_(weights[layers_no +'ln2.weight'])
+
+    return transfomer(in_indices)
 
 
 def run_rmsnorm(

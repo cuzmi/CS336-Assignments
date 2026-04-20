@@ -256,7 +256,7 @@ class MHAwRoPE(nn.Module):
         return output
     
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, weights):
+    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta):
         super().__init__()
         # mla + rmsnorm + rope
         self.d_k = d_model // num_heads
@@ -265,18 +265,6 @@ class TransformerBlock(nn.Module):
         self.rms2 = RMSNorm(d_model)
         self.ffn = SwiGLU(d_model, d_ff)
 
-        with torch.no_grad():
-            self.mha_rope.Q.copy_(weights['attn.q_proj.weight'])
-
-            self.mha_rope.K.copy_(weights['attn.k_proj.weight'])
-            self.mha_rope.V.copy_(weights['attn.v_proj.weight'])
-            self.mha_rope.W_o.copy_(weights['attn.output_proj.weight'])
-
-            self.rms1.W.copy_(weights['ln1.weight'])
-            self.ffn.W1.copy_(weights['ffn.w1.weight'])
-            self.ffn.W3.copy_(weights['ffn.w2.weight'])
-            self.ffn.W2.copy_(weights['ffn.w3.weight'])
-            self.rms2.W.copy_(weights['ln2.weight'])
             
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, _ = x.shape
@@ -287,4 +275,27 @@ class TransformerBlock(nn.Module):
         x = self.ffn(self.rms2(x)) + x
 
         return x
+
         
+class TransformerLM(nn.Module):
+    def __init__(self, vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta):
+        super().__init__()
+        self.emb = Embedding(vocab_size, d_model)
+        
+        self.blocks = nn.ModuleList()
+        for _ in range(num_layers):
+            i_block = TransformerBlock(d_model, num_heads, d_ff, context_length, rope_theta)
+            self.blocks.append(i_block)
+
+        self.rms = RMSNorm(d_model)
+        self.linear = Linear(d_model, vocab_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.emb(x)
+
+        for block in self.blocks:
+            x = block(x)
+        x = self.linear(self.rms(x))
+        # output = softmax(x, dim = -1)
+
+        return x
