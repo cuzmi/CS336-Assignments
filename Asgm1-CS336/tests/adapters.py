@@ -9,10 +9,10 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics import nn_utils, optimizer
 from cs336_basics.Homework2_5 import train_bpe
 from cs336_basics.Homework2_7 import tokenizer
 from cs336_basics.Homework3_all_layers import torch_layers
+from cs336_basics.Homework4 import nn_utils, optimizer
 
 def run_linear(
     d_in: int,
