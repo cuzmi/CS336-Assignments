@@ -4,6 +4,7 @@ loss function + optimizer + training loop
 """
 
 import torch
+import torch.nn as nn
 import numpy as np
 
 def softmax(x: torch.Tensor, dim: int) -> torch.Tensor:
@@ -43,3 +44,25 @@ def get_lr_cosine_schedule(
         return min_learning_rate + ratio
     
     return min_learning_rate
+
+"""
+1. 两种clip方式: a.直接截断 b.scale down
+"""
+def grad_l2_norm_clip(parameters: nn.Parameter, max_l2_norm: float):
+    l2_norm_sum = 0
+    # 这里遍历的是参数W, 而不是W里面的每个元素
+    for p in parameters:
+        if p.grad is None:
+            continue
+        l2_norm_sum += torch.sum(p.grad ** 2)
+    
+    l2_norm = torch.sqrt(l2_norm_sum)
+    
+    if l2_norm <= max_l2_norm:
+        return
+    
+    ratio = max_l2_norm / (l2_norm + 1e-6)
+    for p in parameters:
+        if p.grad is None:
+            continue
+        p.grad.mul_(ratio)
