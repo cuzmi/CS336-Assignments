@@ -4,6 +4,7 @@ loss function + optimizer + training loop
 """
 
 import torch
+import numpy as np
 
 def softmax(x: torch.Tensor, dim: int) -> torch.Tensor:
     # 有可能产生shape变化的数值操作要留意是否保持 shape
@@ -23,3 +24,22 @@ def cross_entropy(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     )
     loss = log_sum_exp - target_logits
     return loss.mean()
+
+def get_lr_cosine_schedule(
+    it: int,
+    max_learning_rate: float,
+    min_learning_rate: float,
+    warmup_iters: int,
+    cosine_cycle_iters: int,
+):
+    if it < warmup_iters:
+        return (it / warmup_iters) * max_learning_rate
+    
+    if it < cosine_cycle_iters:
+        angle = (it - warmup_iters) / (cosine_cycle_iters - warmup_iters)
+        delta = max_learning_rate - min_learning_rate
+        ratio = 0.5 * (1 + np.cos(angle * np.pi)) * delta
+
+        return min_learning_rate + ratio
+    
+    return min_learning_rate
