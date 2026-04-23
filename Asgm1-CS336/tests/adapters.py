@@ -13,6 +13,7 @@ from cs336_basics.Homework2_5 import train_bpe
 from cs336_basics.Homework2_7 import tokenizer
 from cs336_basics.Homework3_all_layers import torch_layers
 from cs336_basics.Homework4 import nn_utils, optimizer
+from cs336_basics.Homework5 import extra_component
 
 def run_linear(
     d_in: int,
@@ -487,7 +488,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return  extra_component.get_batch(dataset, batch_size, context_length, device = "cpu")
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
